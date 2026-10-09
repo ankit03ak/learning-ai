@@ -1,22 +1,33 @@
-# Python virtual environment
+# Python virtual environments
 myvenv/
 venv/
 .venv/
 
-# Environment variables
+# Environment variables and local secrets
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
 
-# Python cache
+# Python cache and tooling
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
 # Logs
 *.log
+
+# Local application data
+*.db
+*.sqlite
+*.sqlite3
 
 # OS files
 .DS_Store
@@ -26,7 +37,7 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Python build files
+# Python build and packaging files
 build/
 dist/
 *.egg-info/
