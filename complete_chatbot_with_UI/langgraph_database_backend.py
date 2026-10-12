@@ -90,9 +90,25 @@ graph.add_edge('tools', 'chat_node')
 
 chatbot = graph.compile(checkpointer = checkpointer)
 
-def retrieve_all_threads():
-    all_threads = set()
-    for checkpoint in checkpointer.list(None):
-        all_threads.add(checkpoint.config['configurable']['thread_id'])
+# def retrieve_all_threads():
+#     all_threads = set()
+#     for checkpoint in checkpointer.list(None):
+#         all_threads.add(checkpoint.config['configurable']['thread_id'])
     
-    return list(all_threads)
+#     return list(all_threads)
+def retrieve_all_threads():
+    all_threads = {}
+
+    for checkpoint in checkpointer.list(None):
+        thread_id = checkpoint.config["configurable"]["thread_id"]
+
+        if thread_id not in all_threads:
+            all_threads[thread_id] = checkpoint
+
+    return sorted(
+        all_threads.keys(),
+        key=lambda thread_id: all_threads[thread_id].checkpoint["ts"]
+        if "ts" in all_threads[thread_id].checkpoint
+        else "",
+        reverse=True
+    )

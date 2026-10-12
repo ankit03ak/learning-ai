@@ -52,11 +52,24 @@ for thread_id in st.session_state['chat_threads'][::-1]:
         temp_messages = []
 
         for msg in messages:
+            # if isinstance(msg, HumanMessage):
+            #     role = 'user'
+            # else :
+            #     role = 'assistant'
+            # temp_messages.append({"role": role, "content": msg.content})
             if isinstance(msg, HumanMessage):
-                role = 'user'
-            else :
-                role = 'assistant'
-            temp_messages.append({"role": role, "content": msg.content})
+                temp_messages.append({
+                    "role": "user",
+                    "content": msg.content
+                })
+
+            elif isinstance(msg, AIMessage):
+                # Skip tool-call messages with no visible text
+                if isinstance(msg.content, str) and msg.content.strip():
+                    temp_messages.append({
+                        "role": "assistant",
+                        "content": msg.content
+                    })
         st.session_state['message_history'] = temp_messages
 
 
@@ -107,7 +120,9 @@ if user_input:
 
                 # Stream ONLY assistant tokens
                 if isinstance(message_chunk, AIMessage):
-                    yield message_chunk.content
+                    content = message_chunk.content
+                    if isinstance(content, str) and content.strip():
+                        yield content
 
         ai_message = st.write_stream(ai_only_stream())
 
