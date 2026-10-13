@@ -23,6 +23,40 @@ def load_conversation(thread_id):
     state = chatbot.get_state(config={'configurable': {'thread_id': thread_id}})
     return state.values.get('messages',[])
 
+def message_content_to_text(content):
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+        return "".join(text_parts).strip()
+
+    return ""
+
+def conversation_to_history(messages):
+    history = []
+
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            continue
+
+        content = message_content_to_text(msg.content)
+        if content:
+            history.append({"role": role, "content": content})
+
+    return history
+
 
 # for history in st.session_state["messages"]:
 if 'message_history' not in st.session_state:
@@ -36,6 +70,13 @@ if 'chat_threads' not in st.session_state:
 
 add_thread(st.session_state['thread_id'])
 
+# Restore the active conversation after a page refresh when Streamlit has
+# recreated session state but retained the current thread id.
+if not st.session_state["message_history"]:
+    st.session_state["message_history"] = conversation_to_history(
+        load_conversation(st.session_state["thread_id"])
+    )
+
 # ************ SIDEBAR UI ************
 st.sidebar.title("LangGraph Chatbot Configurations")
 
@@ -47,35 +88,14 @@ st.sidebar.header("My Conversation History")
 for thread_id in st.session_state['chat_threads'][::-1]:
     if st.sidebar.button(thread_id):
         st.session_state['thread_id'] = thread_id
-        messages = load_conversation(thread_id)
-
-        temp_messages = []
-
-        for msg in messages:
-            # if isinstance(msg, HumanMessage):
-            #     role = 'user'
-            # else :
-            #     role = 'assistant'
-            # temp_messages.append({"role": role, "content": msg.content})
-            if isinstance(msg, HumanMessage):
-                temp_messages.append({
-                    "role": "user",
-                    "content": msg.content
-                })
-
-            elif isinstance(msg, AIMessage):
-                # Skip tool-call messages with no visible text
-                if isinstance(msg.content, str) and msg.content.strip():
-                    temp_messages.append({
-                        "role": "assistant",
-                        "content": msg.content
-                    })
-        st.session_state['message_history'] = temp_messages
+        st.session_state["message_history"] = conversation_to_history(
+            load_conversation(thread_id)
+        )
 
 
 for message in st.session_state["message_history"]:
     with st.chat_message(message["role"]):
-        st.text(message["content"])
+        st.markdown(message["content"])
 
 user_input = st.chat_input("Type your message here...")
 
@@ -120,9 +140,12 @@ if user_input:
 
                 # Stream ONLY assistant tokens
                 if isinstance(message_chunk, AIMessage):
-                    content = message_chunk.content
-                    if isinstance(content, str) and content.strip():
-                        yield content
+                    if getattr(message_chunk, "tool_calls", None):
+                        continue
+
+                    text = message_content_to_text(message_chunk.content)
+                    if text:
+                        yield text
 
         ai_message = st.write_stream(ai_only_stream())
 
