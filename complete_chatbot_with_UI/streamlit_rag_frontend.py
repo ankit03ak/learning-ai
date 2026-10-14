@@ -24,6 +24,40 @@ def load_conversation(thread_id):
     state = chatbot.get_state(config={'configurable': {'thread_id': thread_id}})
     return state.values.get('messages',[])
 
+def message_content_to_text(content):
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+        return "".join(text_parts).strip()
+
+    return ""
+
+def conversation_to_history(messages):
+    history = []
+
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            continue
+
+        content = message_content_to_text(msg.content)
+        if content:
+            history.append({"role": role, "content": content})
+
+    return history
+
 
 # ======================= Session Initialization ===================
 if 'message_history' not in st.session_state:
@@ -44,6 +78,11 @@ thread_key = str(st.session_state["thread_id"])
 thread_docs = st.session_state["ingested_docs"].setdefault(thread_key, {})
 threads = st.session_state["chat_threads"][::-1]
 selected_thread = None
+
+if not st.session_state["message_history"]:
+    st.session_state["message_history"] = conversation_to_history(
+        load_conversation(st.session_state["thread_id"])
+    )
 
 # ************ SIDEBAR UI ************
 st.sidebar.title("LangGraph Chatbot Configurations")
@@ -90,7 +129,7 @@ st.title("Multi Utility Chatbot")
 
 for message in st.session_state["message_history"]:
     with st.chat_message(message["role"]):
-        st.text(message["content"])
+        st.markdown(message["content"])
 
 user_input = st.chat_input("Ask about your document or use tools")
 
@@ -113,31 +152,45 @@ if user_input:
         # Use a mutable holder so the generator can set/modify it
         status_holder = {"box": None}
 
+        
         def ai_only_stream():
-            for message_chunk, _ in chatbot.stream(
+            for message_chunk, metadata in chatbot.stream(
                 {"messages": [HumanMessage(content=user_input)]},
                 config=CONFIG,
                 stream_mode="messages",
             ):
-                # Lazily create & update the SAME status container when any tool runs
-                if isinstance(message_chunk, ToolMessage):
-                    tool_name = getattr(message_chunk, "name", "tool")
-                    if status_holder["box"] is None:
-                        status_holder["box"] = st.status(
-                            f"🔧 Using `{tool_name}` …", expanded=True
-                        )
-                    else:
-                        status_holder["box"].update(
-                            label=f"🔧 Using `{tool_name}` …",
-                            state="running",
-                            expanded=True,
-                        )
+                node_name = metadata.get("langgraph_node")
 
-                # Stream ONLY assistant tokens
+                # Handle tool execution separately; never render tool output as chat text.
+                if node_name == "tools":
+                    if isinstance(message_chunk, ToolMessage):
+                        tool_name = getattr(message_chunk, "name", None) or "tool"
+
+                        if status_holder["box"] is None:
+                            status_holder["box"] = st.status(
+                                f"🔧 Using `{tool_name}` ...",
+                                expanded=True,
+                            )
+                        else:
+                            status_holder["box"].update(
+                                label=f"🔧 Using `{tool_name}` ...",
+                                state="running",
+                                expanded=True,
+                            )
+                    continue
+
+                # Only render messages produced by the assistant node.
+                if node_name != "chat_node":
+                    continue
+
+                
                 if isinstance(message_chunk, AIMessage):
-                    content = message_chunk.content
-                    if isinstance(content, str) and content.strip():
-                        yield content
+                    if message_chunk.tool_calls:
+                        continue
+
+                    text = message_content_to_text(message_chunk.content)
+                    if text:
+                        yield text
 
         ai_message = st.write_stream(ai_only_stream())
 
@@ -161,12 +214,8 @@ st.divider()
 
 if selected_thread:
     st.session_state["thread_id"] = selected_thread
-    messages = load_conversation(selected_thread)
-
-    temp_messages = []
-    for msg in messages:
-        role = "user" if isinstance(msg, HumanMessage) else "assistant"
-        temp_messages.append({"role": role, "content": msg.content})
-    st.session_state["message_history"] = temp_messages
+    st.session_state["message_history"] = conversation_to_history(
+        load_conversation(selected_thread)
+    )
     st.session_state["ingested_docs"].setdefault(str(selected_thread), {})
     st.rerun()

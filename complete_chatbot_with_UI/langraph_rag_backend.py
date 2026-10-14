@@ -138,27 +138,38 @@ def get_stock_price(symbol: str) -> dict:
     return r.json()
 
 @tool
-def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
+def rag_tool(query: str, config: RunnableConfig) -> dict:
     """
-    Retrieve relevant information from the uploaded PDF for this chat thread.
-    Always include the thread_id when calling this tool.
+    Retrieve relevant information from the PDF uploaded to the current chat.
+    The current thread ID is obtained from runtime configuration.
     """
+    thread_id = config.get("configurable", {}).get("thread_id")
+
+    if not thread_id:
+        return {
+            "error": "Thread ID is missing from runtime configuration.",
+            "query": query,
+        }
+
+    thread_id = str(thread_id)
     retriever = _get_retriever(thread_id)
+
     if retriever is None:
         return {
-            "error": "No document indexed for this chat. Upload a PDF first.",
+            "error": (
+                f"No retriever found for thread {thread_id}. "
+                "The PDF may need to be uploaded again."
+            ),
             "query": query,
         }
 
     result = retriever.invoke(query)
-    context = [doc.page_content for doc in result]
-    metadata = [doc.metadata for doc in result]
 
     return {
         "query": query,
-        "context": context,
-        "metadata": metadata,
-        "source_file": _THREAD_METADATA.get(str(thread_id), {}).get("filename"),
+        "context": [doc.page_content for doc in result],
+        "metadata": [doc.metadata for doc in result],
+        "source_file": _THREAD_METADATA.get(thread_id, {}).get("filename"),
     }
 
 
@@ -181,11 +192,9 @@ def chat_node(state: ChatState, config: RunnableConfig | None = None):
 
     system_message = SystemMessage(
         content=(
-            "You are a helpful assistant. For questions about the uploaded PDF, call "
-            "the `rag_tool` and include the thread_id "
-            f"`{thread_id}`. You can also use the web search, stock price, and "
-            "calculator tools when helpful. If no document is available, ask the user "
-            "to upload a PDF."
+            " For questions about an uploaded PDF, call rag_tool with a specific "
+"search query. The tool automatically identifies the current chat's "
+"thread ID. Use the retrieved context to answer the user."
         )
     )
 
